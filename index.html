@@ -487,23 +487,6 @@ hr.dv{border:none;border-top:1px solid var(--brds);margin:16px 0;}
   </div>
 </div>
 
-<!-- END RIDE CONFIRM MODAL -->
-<div class="endmodal-bg hidden" id="endModal">
-  <div class="endmodal">
-    <div class="em-icon">🏁</div>
-    <div class="em-title">Arrived at Destination?</div>
-    <div class="em-sub">Confirm you have reached your drop-off point before ending the ride.</div>
-    <div class="em-fare">
-      <div class="em-fare-v" id="emFare">Rs 0</div>
-      <div class="em-fare-l">Total Fare</div>
-    </div>
-    <div class="em-btns">
-      <button class="btn-emback" onclick="closeEndModal()">Not Yet</button>
-      <button class="btn-emend" onclick="confirmEndRide()">Confirm &amp; Pay</button>
-    </div>
-  </div>
-</div>
-
 <div class="sbovl" id="sbovl" onclick="closeSb()"></div>
 
 <!-- AUTH -->
@@ -792,8 +775,23 @@ const rndF=(a,b)=>+(Math.random()*(b-a)+a).toFixed(1);
 const pkr=n=>'Rs '+Math.round(n).toLocaleString('en-PK');
 const ini=n=>(n||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
 
-function save(){if(!S.user)return;localStorage.setItem('sw_u',JSON.stringify(S.user));localStorage.setItem('sw_l',JSON.stringify(S.log));localStorage.setItem('sw_a',JSON.stringify(S.active));}
-function load(){try{const u=localStorage.getItem('sw_u');const l=localStorage.getItem('sw_l');const a=localStorage.getItem('sw_a');if(u)S.user=JSON.parse(u);if(l)S.log=JSON.parse(l);if(a)S.active=JSON.parse(a);}catch(e){}}
+function save(){
+  if(!S.user)return;
+  localStorage.setItem('sw_reg',JSON.stringify(S.user)); // permanent account record — never deleted
+  localStorage.setItem('sw_u',JSON.stringify(S.user));   // active session marker
+  localStorage.setItem('sw_l',JSON.stringify(S.log));
+  localStorage.setItem('sw_a',JSON.stringify(S.active));
+}
+function load(){
+  try{
+    const u=localStorage.getItem('sw_u');
+    const l=localStorage.getItem('sw_l');
+    const a=localStorage.getItem('sw_a');
+    if(u)S.user=JSON.parse(u);
+    if(l)S.log=JSON.parse(l);
+    if(a)S.active=JSON.parse(a);
+  }catch(e){}
+}
 function toast(msg,t='ok'){const d=$('tdk'),el=document.createElement('div');el.className=`tst ${t}`;el.innerHTML=`<div class="tdot"></div><span>${msg}</span>`;d.appendChild(el);setTimeout(()=>el.remove(),3000);}
 function toggleTheme(){const h=document.documentElement,nxt=h.getAttribute('data-theme')==='dark'?'light':'dark';h.setAttribute('data-theme',nxt);localStorage.setItem('sw_t',nxt);rdm();}
 (()=>{const t=localStorage.getItem('sw_t');if(t)document.documentElement.setAttribute('data-theme',t);})();
@@ -834,14 +832,17 @@ function doLogin(){
   const name=$('lName').value.trim();
   if(!phone||phone.replace(/\D/g,'').length<7){showAuthErr('Enter a valid phone number.');return;}
   if(!name){showAuthErr('Enter your registered name.');return;}
-  // Check localStorage for a registered account matching phone+name
-  const stored=localStorage.getItem('sw_u');
+  // Read from permanent registration record
+  const stored=localStorage.getItem('sw_reg');
   if(!stored){showAuthErr('No account found. Please register first.');return;}
   const reg=JSON.parse(stored);
   if(reg.phone.replace(/\D/g,'')!==phone.replace(/\D/g,'')){showAuthErr('Phone number not found. Please register.');return;}
   if(reg.name.trim().toLowerCase()!==name.toLowerCase()){showAuthErr('Name does not match. Check your details.');return;}
-  // Valid login — restore saved state
-  load();
+  // Valid login — restore user + ride history
+  S.user=reg;
+  try{const l=localStorage.getItem('sw_l');if(l)S.log=JSON.parse(l);}catch(e){}
+  S.active=null; // don't restore in-progress ride across sessions
+  save();
   boot();
   toast('Welcome back, '+reg.name+'! 👋','ok');
 }
@@ -852,7 +853,7 @@ function doSignup(){
   if(!name||name.length<2){showAuthErr('Enter your full name.');return;}
   if(!phone||phone.replace(/\D/g,'').length<7){showAuthErr('Enter a valid phone number.');return;}
   // Check if already registered
-  const stored=localStorage.getItem('sw_u');
+  const stored=localStorage.getItem('sw_reg');
   if(stored){
     const reg=JSON.parse(stored);
     if(reg.phone.replace(/\D/g,'')===phone.replace(/\D/g,'')){
@@ -874,8 +875,11 @@ function doLogout(){
   // Stop all timers
   Object.values(S.timers).forEach(clearInterval);S.timers={};
   clearInterval(rideInt);rideInt=null;
-  // Clear localStorage
-  localStorage.removeItem('sw_u');localStorage.removeItem('sw_a');localStorage.removeItem('sw_l');
+  // Remove session only — keep sw_reg so user can sign back in
+  localStorage.removeItem('sw_u');
+  localStorage.removeItem('sw_a');
+  localStorage.removeItem('sw_l');
+  // sw_reg is intentionally kept
   // Reset state
   S.user=null;S.active=null;S.offers=[];S.prog=0;
   S.log={booked:[],current:null,completed:[]};
@@ -883,7 +887,6 @@ function doLogout(){
   // Hide modals
   $('revModal').classList.add('hidden');
   $('cxModal').classList.add('hidden');
-  $('endModal').classList.add('hidden');
   // Switch UI
   $('appShell').classList.add('hidden');$('appShell').style.display='none';
   $('bnav').style.display='none';
@@ -938,11 +941,12 @@ function genOffer(forceCP=false){
   const veh=VEHS[vt][rnd(0,VEHS[vt].length-1)];
   const baseF=BASE[vt]*INF;
   const fare=Math.round(baseF*rndF(.88,1.38));
-  const dist=rndF(6,14),eta=rnd(2,12);
+  const dist=rndF(0.3,3.0); // driver proximity — max 3 km from pickup
+  const eta=Math.max(1,Math.round(dist*4+rnd(1,3))); // realistic ETA based on proximity
   const rating=rndF(3.5,5.0);
   const cond=rnd(58,99);
   const seats=isCP?rnd(1,3):null;
-  const smart=Math.round(Math.max(0,100-dist*4)*.3+((rating-1)/4)*100*.3+Math.max(0,(1-(fare-baseF*.88)/(baseF*.5)))*100*.2+cond*.2);
+  const smart=Math.round(Math.max(0,100-dist*15)*.3+((rating-1)/4)*100*.3+Math.max(0,(1-(fare-baseF*.88)/(baseF*.5)))*100*.2+cond*.2);
   return{id:`o_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,plat,name,veh,fare,dist,eta,rating,cond,smart,timer:10,pickup:$('pickup')?.value||'DHA Phase 6',dropoff:$('dropoff')?.value||'Dolmen Mall',vehType:vt,seats};
 }
 
@@ -1098,9 +1102,24 @@ function accept(id){
   $('ofList').innerHTML=`<div class="nooffer"><svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h5l3 3v5h-8V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg><p>Ride accepted ✓</p><small>Track on the Current Ride screen</small></div>`;
   $('ofPgSub').textContent='Ride accepted — no active offers';$('rdCard').classList.add('hidden');
   save();$('navL').classList.remove('hidden');
-  toast('Ride accepted — '+o.name+' is on the way','ok');
+  toast('Ride booked! '+o.name+' is heading to your pickup','ok');
   go('current');updateCR();setTimeout(()=>drawMap('aMapC',0),60);
-  setTimeout(()=>{if(!S.active)return;S.active.status='arriving';S.active.step=2;save();updateCR();toast('🚗 '+o.name+' has arrived!','ok');},8000);
+
+  // ── RIDER (driver) arrives at pickup automatically based on ETA ──
+  const arrivalMs = o.eta * 60 * 1000;
+  setTimeout(()=>{
+    if(!S.active||S.active.rideId!==S.active?.rideId)return;
+    S.active.status='arriving';S.active.step=2;
+    save();updateCR();
+    toast('📍 '+o.name+' has arrived at your pickup!','ok');
+
+    // ── RIDER starts the trip ~10s after arriving at pickup ──
+    setTimeout(()=>{
+      if(!S.active||S.active.status!=='arriving')return;
+      startRide();
+    }, 10000);
+
+  }, arrivalMs);
 }
 
 /* ── CANCEL FLOW ── */
@@ -1156,54 +1175,95 @@ function updateCR(){
   for(let i=1;i<=4;i++){const el=$(`st${i}`);el.classList.remove('ac','dn');if(i<r.step)el.classList.add('dn');else if(i===r.step)el.classList.add('ac');}
   const btn=$('actRow');
   if(r.status==='booked'){
-    $('sText').textContent='Awaiting Driver';$('sBadge').className='sbadge aw';
-    $('aEta').textContent='Arriving in ~'+r.eta+' min';$('crSub').textContent='Driver confirmed';
-    btn.innerHTML=`<button class="bact bstart" style="opacity:.5;cursor:not-allowed;" disabled>⏳ Waiting for driver...</button><button class="bact bcx" onclick="openCxModal()">✕ Cancel</button>`;
+    $('sText').textContent='Driver On The Way';$('sBadge').className='sbadge aw';
+    $('aEta').textContent='Arriving in ~'+r.eta+' min';$('crSub').textContent='Driver confirmed — heading to pickup';
+    btn.innerHTML=`
+      <div style="flex:1;">
+        <div style="font-size:10px;font-weight:600;color:var(--txtm);margin-bottom:6px;text-transform:uppercase;letter-spacing:.8px;">🚗 Driver en route to your pickup</div>
+        <div style="background:var(--bg-surf);border-radius:20px;height:6px;overflow:hidden;">
+          <div id="drvProgressBar" style="height:100%;background:linear-gradient(90deg,var(--green),var(--green-glow));border-radius:20px;width:0%;transition:width 1s linear;"></div>
+        </div>
+        <div style="font-size:10px;color:var(--txtm);margin-top:5px;">Rider will start the ride upon arrival at pickup point</div>
+      </div>
+      <button class="bact bcx" onclick="openCxModal()" style="flex:0 0 auto;max-width:100px;">✕ Cancel</button>`;
+    animateDriverProgress(r);
   }else if(r.status==='arriving'){
     $('sText').textContent='Driver Arrived';$('sBadge').className='sbadge ar';
-    $('aEta').textContent='Driver is here — ready to go!';$('crSub').textContent='Driver has arrived';
-    btn.innerHTML=`<button class="bact bstart" onclick="startRide()">🚀 Start Ride</button><button class="bact bcx" onclick="openCxModal()">✕ Cancel</button>`;
+    $('aEta').textContent='Driver is at your pickup point';$('crSub').textContent='Rider starting your ride...';
+    btn.innerHTML=`
+      <div style="flex:1;">
+        <div style="font-size:10px;font-weight:700;color:#4de8a0;margin-bottom:6px;text-transform:uppercase;letter-spacing:.8px;">✅ Driver at pickup — ride starting shortly</div>
+        <div style="font-size:11px;color:var(--txtm);">The rider has confirmed arrival and will start your ride momentarily</div>
+      </div>`;
   }else if(r.status==='in-transit'){
     $('sText').textContent='In Transit';$('sBadge').className='sbadge tr';
     $('aEta').textContent='En route to destination';$('crSub').textContent='Ride in progress';
-    btn.innerHTML=`<button class="bact bend" onclick="openEndModal()">🏁 End Ride</button><button class="bact bcx" onclick="openCxModal()">✕ Cancel</button>`;
+    btn.innerHTML=`
+      <div style="flex:1;">
+        <div style="font-size:10px;font-weight:600;color:var(--txtm);margin-bottom:6px;text-transform:uppercase;letter-spacing:.8px;">🏁 En route to drop-off</div>
+        <div style="background:var(--bg-surf);border-radius:20px;height:6px;overflow:hidden;">
+          <div id="tripProgressBar" style="height:100%;background:linear-gradient(90deg,var(--bykea-bd),var(--bykea-acc));border-radius:20px;width:${Math.round(S.prog*100)}%;transition:width 1s linear;"></div>
+        </div>
+        <div style="font-size:10px;color:var(--txtm);margin-top:5px;">Rider will end the ride upon reaching drop-off point</div>
+      </div>`;
   }
+}
+
+/* Animate the driver-approaching progress bar while status=booked */
+function animateDriverProgress(r){
+  const bar=$('drvProgressBar');
+  if(!bar||!S.active||S.active.status!=='booked')return;
+  const etaMs=r.eta*60*1000;
+  const start=Date.now();
+  const tick=()=>{
+    if(!S.active||S.active.status!=='booked')return;
+    const b=$('drvProgressBar');if(!b)return;
+    const pct=Math.min(99,((Date.now()-start)/etaMs)*100);
+    b.style.width=pct+'%';
+    if(pct<99)requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 
 let rideInt=null;
 function startRide(){
-  if(!S.active||S.active.status!=='arriving'){toast('Waiting for driver to arrive first','warn');return;}
+  if(!S.active||S.active.status!=='arriving')return; // rider-side only, no user toast
   S.active.status='in-transit';S.active.step=3;S.prog=0;save();updateCR();
-  toast('🚗 Ride started — safe travels!','ok');
+  toast('🚗 Ride started — enjoy your trip!','ok');
   if(rideInt)clearInterval(rideInt);
+  // trip duration: eta minutes (capped 1-20min for demo, scaled to real time / 6 for speed)
+  const tripDurationMs = Math.min(S.active.eta, 20) * 60 * 1000 / 6;
+  const startT = Date.now();
   rideInt=setInterval(()=>{
-    S.prog+=0.014;
-    if(S.prog>=1){clearInterval(rideInt);S.prog=.99;}
-    drawMap('aMapC',S.prog);
-    const rem=Math.max(0,Math.round(S.active.eta*(1-S.prog)));
-    const remD=(S.active.dist*(1-S.prog)).toFixed(1);
-    $('amTime').textContent=rem+' min';$('amDist').textContent=remD+' km';
-  },1000);
+    const elapsed = Date.now() - startT;
+    S.prog = Math.min(elapsed / tripDurationMs, 1);
+    drawMap('aMapC', S.prog);
+    const rem = Math.max(0, Math.round(S.active.eta * (1 - S.prog)));
+    const remD = (S.active.dist * (1 - S.prog)).toFixed(1);
+    const tbar = $('tripProgressBar');
+    if(tbar) tbar.style.width = Math.round(S.prog*100)+'%';
+    if($('amTime')) $('amTime').textContent = rem+' min';
+    if($('amDist')) $('amDist').textContent = remD+' km';
+    if(S.prog >= 1){
+      clearInterval(rideInt);rideInt=null;
+      // ── RIDER ends trip automatically upon reaching drop-off ──
+      setTimeout(()=>riderEndsRide(), 2000);
+    }
+  },500);
 }
 
-/* ── END RIDE — requires confirmation ── */
-function openEndModal(){
-  if(!S.active||S.active.status!=='in-transit'){toast('Ride must be in progress to end','warn');return;}
-  $('emFare').textContent=pkr(S.active.fare);
-  $('endModal').classList.remove('hidden');
-}
-function closeEndModal(){$('endModal').classList.add('hidden');}
-function confirmEndRide(){
-  closeEndModal();
-  if(!S.active)return;
+/* Called automatically by rider upon reaching drop-off — user cannot trigger this */
+function riderEndsRide(){
+  if(!S.active||S.active.status!=='in-transit')return;
   clearInterval(rideInt);rideInt=null;S.prog=0;
   const done={...S.active,status:'completed',completedAt:new Date().toISOString(),step:4};
   S.log.booked=S.log.booked.filter(r=>r.rideId!==done.rideId);
-  S.log.current=null;
-  S.active=null;
+  S.log.current=null;S.active=null;
   $('navL').classList.add('hidden');
   S.pendingReview=done;
-  save();updateCR();openReview(done);
+  save();updateCR();
+  toast('🏁 You have arrived! Rate your ride.','ok');
+  openReview(done);
 }
 
 /* ── REVIEW ── */
