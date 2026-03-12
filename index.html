@@ -515,15 +515,16 @@ hr.dv{border:none;border-top:1px solid var(--brds);margin:16px 0;}
       <button class="atab active" onclick="authTab('login',this)">Sign In</button>
       <button class="atab" onclick="authTab('signup',this)">Register</button>
     </div>
+    <div id="authErr" style="color:#e07070;font-size:11px;font-weight:600;text-align:center;min-height:16px;margin-bottom:10px;animation:fup .2s ease;"></div>
     <div id="aLogin">
-      <div class="fg"><label class="fl">Phone Number</label><input type="tel" class="fi" id="lPhone" placeholder="+92 300 0000000"></div>
-      <div class="fg"><label class="fl">Full Name</label><input type="text" class="fi" id="lName" placeholder="e.g. Ahmed Raza"></div>
-      <button class="btn-pri" onclick="doAuth()">Continue</button>
+      <div class="fg"><label class="fl">Phone Number</label><input type="tel" class="fi" id="lPhone" placeholder="+92 300 0000000" onkeydown="if(event.key==='Enter')doLogin()"></div>
+      <div class="fg"><label class="fl">Full Name</label><input type="text" class="fi" id="lName" placeholder="e.g. Ahmed Raza" onkeydown="if(event.key==='Enter')doLogin()"></div>
+      <button class="btn-pri" onclick="doLogin()">Sign In</button>
     </div>
     <div id="aSignup" class="hidden">
-      <div class="fg"><label class="fl">Full Name</label><input type="text" class="fi" id="sName" placeholder="Your full name"></div>
-      <div class="fg"><label class="fl">Phone Number</label><input type="tel" class="fi" id="sPhone" placeholder="+92 300 0000000"></div>
-      <button class="btn-pri" onclick="doAuth('signup')">Create Account</button>
+      <div class="fg"><label class="fl">Full Name</label><input type="text" class="fi" id="sName" placeholder="Your full name" onkeydown="if(event.key==='Enter')doSignup()"></div>
+      <div class="fg"><label class="fl">Phone Number</label><input type="tel" class="fi" id="sPhone" placeholder="+92 300 0000000" onkeydown="if(event.key==='Enter')doSignup()"></div>
+      <button class="btn-pri" onclick="doSignup()">Create Account</button>
     </div>
   </div>
 </div>
@@ -820,16 +821,54 @@ function swapLocs(){
 }
 
 /* ── AUTH ── */
-function authTab(t,btn){document.querySelectorAll('.atab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');$('aLogin').classList.toggle('hidden',t!=='login');$('aSignup').classList.toggle('hidden',t!=='signup');}
-function doAuth(mode='login'){
-  const name=(mode==='signup'?$('sName').value:$('lName').value).trim();
-  const phone=(mode==='signup'?$('sPhone').value:$('lPhone').value).trim();
-  if(!name){toast('Please enter your name','warn');return;}
-  if(!phone||phone.replace(/\D/g,'').length<7){toast('Please enter a valid phone number','warn');return;}
+function authTab(t,btn){
+  document.querySelectorAll('.atab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  $('aLogin').classList.toggle('hidden',t!=='login');
+  $('aSignup').classList.toggle('hidden',t!=='signup');
+  $('authErr').textContent='';
+}
+
+function doLogin(){
+  const phone=$('lPhone').value.trim();
+  const name=$('lName').value.trim();
+  if(!phone||phone.replace(/\D/g,'').length<7){showAuthErr('Enter a valid phone number.');return;}
+  if(!name){showAuthErr('Enter your registered name.');return;}
+  // Check localStorage for a registered account matching phone+name
+  const stored=localStorage.getItem('sw_u');
+  if(!stored){showAuthErr('No account found. Please register first.');return;}
+  const reg=JSON.parse(stored);
+  if(reg.phone.replace(/\D/g,'')!==phone.replace(/\D/g,'')){showAuthErr('Phone number not found. Please register.');return;}
+  if(reg.name.trim().toLowerCase()!==name.toLowerCase()){showAuthErr('Name does not match. Check your details.');return;}
+  // Valid login — restore saved state
+  load();
+  boot();
+  toast('Welcome back, '+reg.name+'! 👋','ok');
+}
+
+function doSignup(){
+  const name=$('sName').value.trim();
+  const phone=$('sPhone').value.trim();
+  if(!name||name.length<2){showAuthErr('Enter your full name.');return;}
+  if(!phone||phone.replace(/\D/g,'').length<7){showAuthErr('Enter a valid phone number.');return;}
+  // Check if already registered
+  const stored=localStorage.getItem('sw_u');
+  if(stored){
+    const reg=JSON.parse(stored);
+    if(reg.phone.replace(/\D/g,'')===phone.replace(/\D/g,'')){
+      showAuthErr('This number is already registered. Please sign in.');return;
+    }
+  }
   S.user={name,phone,joined:new Date().toISOString()};
+  S.log={booked:[],current:null,completed:[]};
   save();
   boot();
-  toast('Welcome, '+name+'! 👋','ok');
+  toast('Account created! Welcome, '+name+' 🎉','ok');
+}
+
+function showAuthErr(msg){
+  const el=$('authErr');el.textContent=msg;
+  el.style.animation='none';el.offsetHeight;el.style.animation='';
 }
 function doLogout(){
   // Stop all timers
@@ -849,7 +888,7 @@ function doLogout(){
   $('appShell').classList.add('hidden');$('appShell').style.display='none';
   $('bnav').style.display='none';
   // Reset auth form
-  $('lName').value='';$('lPhone').value='';
+  $('lName').value='';$('lPhone').value='';$('sName').value='';$('sPhone').value='';$('authErr').textContent='';
   $('scr-auth').style.display='';$('scr-auth').classList.add('active');
   toast('Signed out successfully','ok');
 }
