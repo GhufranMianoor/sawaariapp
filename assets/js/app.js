@@ -1,34 +1,18 @@
 /* ── STATE ── */
-const S={user:null,scr:'auth',veh:'Bike',offers:[],timers:{},active:null,log:{booked:[],current:null,completed:[]},logTab:'booked',pendingReview:null,stars:0,prog:0,rideInt:null,cxReason:null,cxMode:'ride'};
+const S={user:null,scr:'auth',veh:'',offers:[],timers:{},active:null,log:{booked:[],current:null,completed:[]},logTab:'booked',pendingReview:null,stars:0,prog:0,rideInt:null,cxReason:null,cxMode:'ride'};
 
-const NAMES=['Ali Hassan','Umar Farooq','Bilal Ahmed','Kashif Raza','Zain Abideen','Asad Mehmood','Hamza Butt','Saad Malik','Faisal Khan','Waseem Aktar','Tariq Nawaz','Imran Shah','Shoaib Iqbal','Nawaz Ahmed'];
-const VEHS={Bike:['Honda CD 70 (2023)','Yamaha YBR 125','Honda CG 125'],Rickshaw:['Sazgar Electric','Qingqi 200cc','CNG Rickshaw'],Mini:['Suzuki Alto (2023)','KIA Picanto','Toyota Aqua'],Sedan:['Toyota Corolla (2024)','Honda City (2023)','Hyundai Sonata'],Business:['Toyota Fortuner (2024)','Honda CR-V','Hyundai Tucson'],Carpool:['Toyota Corolla (2024)','Honda BR-V','KIA Sportage']};
-const PLATS=['yango','bykea','indrive'];
-const PL={yango:'Yango',bykea:'Bykea',indrive:'InDrive',carpool:'Carpool'};
-const BASE={Bike:130,Rickshaw:180,Mini:280,Sedan:380,Business:620,Carpool:120};
 const INF=1.25;
-const LOCS=[
-  {m:'DHA Phase 6, Karachi',s:'Defence Housing Authority'},
-  {m:'Dolmen Mall, Clifton',s:'Block 4, Clifton'},
-  {m:'Saddar, Karachi',s:'Central Business District'},
-  {m:'Gulshan-e-Iqbal, Karachi',s:'Block 13-B'},
-  {m:'Karachi Airport (JIAP)',s:'PAF Base Faisal'},
-  {m:'Tariq Road, Karachi',s:'PECHS'},
-  {m:'Clifton Beach',s:'Block 5, Clifton'},
-  {m:'Hyderi Market',s:'North Nazimabad, Karachi'},
-  {m:'Bahadurabad, Karachi',s:'Gulshan-e-Iqbal'},
-  {m:'Malir Cantt, Karachi',s:'Malir'},
-  {m:'Shahrah-e-Faisal',s:'PECHS, Karachi'},
-  {m:'University Road',s:'Gulshan, Karachi'},
-  {m:'Scheme 33, Karachi',s:'Gulzar-e-Hijri'},
-  {m:'Johar Chowrangi',s:'Gulshan-e-Iqbal'},
-  {m:'Kemari Port',s:'West Wharf, Karachi'},
-  {m:'Landhi Industrial Area',s:'Karachi'},
-  {m:'North Karachi Sector 11',s:'North Karachi'},
-  {m:'Boat Basin, Clifton',s:'Block 9, Clifton'},
-  {m:'Korangi Industrial Area',s:'Karachi'},
-  {m:'Askari Park',s:'Malir Cantt, Karachi'},
-];
+const REF={
+  vehicleTypes:[],
+  platforms:[],
+  locations:[],
+  drivers:[],
+  vehicles:[],
+  baseByType:{},
+  platformByCode:{},
+  platformCodes:[],
+  vehiclesByType:{},
+};
 
 const $=id=>document.getElementById(id);
 const rnd=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
@@ -40,6 +24,80 @@ const DB={client:null,enabled:false};
 const EMPTY_LOG=()=>({booked:[],current:null,completed:[]});
 let saveInFlight=false;
 let saveQueued=false;
+
+function vehIcon(type){
+  const m={Bike:'🏍️',Rickshaw:'🛺',Mini:'🚙',Sedan:'🚗',Business:'🚐',Carpool:'👥'};
+  return m[type]||'🚗';
+}
+function platName(code){return REF.platformByCode[code]||code||'-';}
+function baseFare(type){
+  if(REF.baseByType[type]!=null)return REF.baseByType[type];
+  const first=Object.values(REF.baseByType)[0];
+  return first!=null?first:0;
+}
+function toLocView(row){
+  const city=row.city&&String(row.city).trim()?String(row.city).trim():'Karachi';
+  return {m:row.name.includes(city)?row.name:`${row.name}, ${city}`,s:row.area||city};
+}
+function vehicleTypeList(){return REF.vehicleTypes;}
+
+function renderVehicleTabs(){
+  const wrap=$('vtabs');
+  if(!wrap)return;
+  const list=vehicleTypeList();
+  if(!list.length){wrap.innerHTML='';return;}
+  if(!list.find(v=>v.code===S.veh))S.veh=list[0].code;
+  wrap.innerHTML=list.map(v=>`<div class="vtab ${v.code===S.veh?'active':''} ${v.carpool?'cp':''}" data-t="${v.code}"><span class="vtico">${vehIcon(v.code)}</span><span class="vtlbl">${v.name||v.code}</span></div>`).join('');
+  wrap.querySelectorAll('.vtab').forEach(el=>el.addEventListener('click',()=>selVeh(el,el.dataset.t)));
+}
+
+function initLocationDefaults(){
+  if(!REF.locations.length)return;
+  if(!$('pickup').value.trim())$('pickup').value=toLocView(REF.locations[0]).m;
+  if(!$('dropoff').value.trim())$('dropoff').value=toLocView(REF.locations[1]||REF.locations[0]).m;
+}
+
+async function loadRefData(){
+  if(!DB.enabled)return;
+  const [vtRes,plRes,locRes,drvRes,vehRes]=await Promise.all([
+    DB.client.from('vehicle_types').select('id,code,name,base_fare,carpool').order('id',{ascending:true}),
+    DB.client.from('platforms').select('id,code,name').order('id',{ascending:true}),
+    DB.client.from('locations').select('id,name,area,city').order('created_at',{ascending:true}).limit(100),
+    DB.client.from('drivers').select('id,name,rating').order('created_at',{ascending:true}).limit(200),
+    DB.client.from('vehicles').select('id,type_id,model').order('created_at',{ascending:true}).limit(400),
+  ]);
+  if(vtRes.error||plRes.error||locRes.error||drvRes.error||vehRes.error){
+    console.error('Reference data load failed:',vtRes.error||plRes.error||locRes.error||drvRes.error||vehRes.error);
+    return;
+  }
+  REF.vehicleTypes=vtRes.data||[];
+  REF.platforms=plRes.data||[];
+  REF.locations=locRes.data||[];
+  REF.drivers=drvRes.data||[];
+  REF.vehicles=vehRes.data||[];
+
+  REF.baseByType={};
+  const typeById={};
+  REF.vehiclesByType={};
+  REF.vehicleTypes.forEach(v=>{
+    typeById[v.id]=v.code;
+    REF.baseByType[v.code]=Number(v.base_fare)||0;
+    REF.vehiclesByType[v.code]=[];
+  });
+  REF.platformByCode={};
+  REF.platformCodes=[];
+  REF.platforms.forEach(p=>{
+    REF.platformByCode[p.code]=p.name;
+    REF.platformCodes.push(p.code);
+  });
+  REF.vehicles.forEach(v=>{
+    const code=typeById[v.type_id];
+    if(code&&REF.vehiclesByType[code])REF.vehiclesByType[code].push(v.model);
+  });
+
+  renderVehicleTabs();
+  initLocationDefaults();
+}
 
 function normPhone(v){return (v||'').replace(/\D/g,'');}
 function normName(v){return (v||'').trim().toLowerCase();}
@@ -64,8 +122,8 @@ function setTheme(theme,persist=true){
 }
 
 function getSupabaseConfig(){
-  const url=window.SUPABASE_URL||'https://rtzirnesxgpeegvanoeq.supabase.co';
-  const key=window.SUPABASE_ANON_KEY||'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ0emlybmVzeGdwZWVndmFub2VxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5MTM4MzAsImV4cCI6MjA4OTQ4OTgzMH0.0ReAt-9Ai0qV7x5AG3gWoGGD5y5ysisp9CpFeWBogOc';
+  const url=window.SUPABASE_URL||'';
+  const key=window.SUPABASE_ANON_KEY||'';
   return {url,key};
 }
 
@@ -172,8 +230,9 @@ function showDD(f,v){
   const id=f==='P'?'ddP':'ddD';const dd=$(id);
   if(ddT[id])clearTimeout(ddT[id]);
   const q=(v||'').toLowerCase();
-  let res=LOCS.filter(l=>!q||l.m.toLowerCase().includes(q)||l.s.toLowerCase().includes(q));
-  if(!res.length)res=LOCS.slice(0,6);else res=res.slice(0,6);
+  const locs=REF.locations.map(toLocView);
+  let res=locs.filter(l=>!q||l.m.toLowerCase().includes(q)||l.s.toLowerCase().includes(q));
+  if(!res.length)res=locs.slice(0,6);else res=res.slice(0,6);
   dd.innerHTML=res.map(r=>`<div class="locsg" onclick="pickLoc('${f}','${r.m}','${id}')"><div class="locsg-ico">📍</div><div><div class="lmain">${r.m}</div><div class="lsub">${r.s}</div></div></div>`).join('');
   dd.classList.add('open');
 }
@@ -286,7 +345,7 @@ function go(name){
 /* ── VEHICLE ── */
 function selVeh(el,t){document.querySelectorAll('.vtab').forEach(v=>v.classList.remove('active'));el.classList.add('active');S.veh=t;updFare();}
 function updFare(){
-  const base=BASE[S.veh]*INF;const dist=rndF(5,15);const time=Math.round(dist*3+rnd(5,10));
+  const base=baseFare(S.veh)*INF;const dist=rndF(5,15);const time=Math.round(dist*3+rnd(5,10));
   $('fdist').textContent=dist+' km';$('ftime').textContent=time+' min';
   $('fbase').textContent=pkr(base*.6);
   $('frange').innerHTML=pkr(base)+'&nbsp;&ndash;&nbsp;'+pkr(base*1.35);
@@ -296,23 +355,30 @@ function updFare(){
 /* ── GEN OFFER ── */
 function genOffer(){
   const isCP=(S.veh==='Carpool');
-  const plat=isCP?'carpool':PLATS[rnd(0,2)];
+  const normalPlats=REF.platformCodes.filter(p=>p!=='carpool');
+  const allPlats=REF.platformCodes;
+  const plat=isCP?'carpool':(normalPlats.length?normalPlats[rnd(0,normalPlats.length-1)]:(allPlats[0]||'platform'));
   const vt=isCP?'Carpool':S.veh;
-  const name=NAMES[rnd(0,NAMES.length-1)];
-  const veh=VEHS[vt][rnd(0,VEHS[vt].length-1)];
-  const baseF=BASE[vt]*INF;
+  const drv=REF.drivers.length?REF.drivers[rnd(0,REF.drivers.length-1)]:null;
+  const name=drv?.name||'Driver';
+  const vehOpts=REF.vehiclesByType[vt]||[];
+  const veh=vehOpts.length?vehOpts[rnd(0,vehOpts.length-1)]:`${vt} Ride`;
+  const baseF=baseFare(vt)*INF;
   const fare=Math.round(baseF*rndF(.88,1.38));
   const dist=rndF(0.3,3.0); // driver proximity — max 3 km from pickup
   const eta=Math.max(1,Math.round(dist*4+rnd(1,3))); // realistic ETA based on proximity
-  const rating=rndF(3.5,5.0);
+  const rating=drv?.rating?Number(drv.rating):rndF(3.5,5.0);
   const cond=rnd(58,99);
   const seats=isCP?rnd(1,3):null;
   const smart=Math.round(Math.max(0,100-dist*15)*.3+((rating-1)/4)*100*.3+Math.max(0,(1-(fare-baseF*.88)/(baseF*.5)))*100*.2+cond*.2);
-  return{id:`o_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,plat,name,veh,fare,dist,eta,rating,cond,smart,timer:10,pickup:$('pickup')?.value||'DHA Phase 6',dropoff:$('dropoff')?.value||'Dolmen Mall',vehType:vt,seats};
+  const p0=toLocView(REF.locations[0]||{name:'Pickup',area:'',city:''}).m;
+  const p1=toLocView(REF.locations[1]||REF.locations[0]||{name:'Drop-off',area:'',city:''}).m;
+  return{id:`o_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,plat,name,veh,fare,dist,eta,rating,cond,smart,timer:10,pickup:$('pickup')?.value||p0,dropoff:$('dropoff')?.value||p1,vehType:vt,seats};
 }
 
 /* ── SEARCH ── */
 function searchRides(){
+  if(!S.veh){toast('Vehicle types are loading. Please try again.','warn');return;}
   if(!$('pickup').value.trim()||!$('dropoff').value.trim()){toast('Please enter pickup and drop-off locations','warn');return;}
   Object.values(S.timers).forEach(clearInterval);S.timers={};S.offers=[];
   for(let i=0;i<5;i++)S.offers.push(genOffer());
@@ -324,7 +390,7 @@ function searchRides(){
 }
 
 function syncOffers(){
-  const base=BASE[S.veh]*INF;
+  const base=baseFare(S.veh)*INF;
   const dist=$('fdist')?.textContent||'-';const time=$('ftime')?.textContent||'-';
   $('omDist').textContent=dist;$('omTime').textContent=time;$('omFrom').textContent=pkr(base);
   $('omPU').textContent=$('pickup')?.value||'-';
@@ -375,7 +441,7 @@ function mkCard(o,isNew=false){
     <div class="ocard-stripe"></div>
     <div class="ocard-body">
       <div class="och">
-        <div class="platbadge ${o.plat}"><div class="platbadge-dot"></div>${PL[o.plat]}</div>
+        <div class="platbadge ${o.plat}"><div class="platbadge-dot"></div>${platName(o.plat)}</div>
         ${o.rec?'<div class="recbadge">★ Best Match</div>':''}
         <div class="och-right">
           <div class="tcirc">
@@ -443,7 +509,7 @@ function startTimer(id){
           S.offers.forEach((x,i)=>x.rec=(i===0));
           rerenderOffers();
           $('ofCount').textContent=S.offers.length+' offers found';
-          const bar=$('newbar');$('newbarName').textContent='— '+fresh.name+' ('+PL[fresh.plat]+')';
+          const bar=$('newbar');$('newbarName').textContent='— '+fresh.name+' ('+platName(fresh.plat)+')';
           bar.classList.add('show');setTimeout(()=>bar.classList.remove('show'),2600);
         },220);
       }
@@ -501,13 +567,29 @@ function setCxReasons(reasons){
   $('cxReasons').innerHTML=reasons.map(r=>`<div class="cx-reason" onclick="selReason(this,'${r}')">${r}</div>`).join('');
 }
 
+function transitCancelState(){
+  const r=S.active;
+  if(!r||r.status!=='in-transit')return{allowed:true,reason:''};
+  const pct=Math.round(S.prog*100);
+  const remMin=Math.max(0,Math.round((r.eta||0)*(1-S.prog)));
+  const allowed=(pct<=35)||(remMin>=5);
+  if(allowed)return{allowed:true,reason:''};
+  return{allowed:false,reason:'Transit cancellation is unavailable near drop-off. Contact support for emergencies.'};
+}
+
 function openCxModal(mode='ride'){
   const r=S.active;
   if(mode!=='offers'&&!r)return;
+  if(mode==='ride'&&r.status==='in-transit'){
+    const st=transitCancelState();
+    if(!st.allowed){toast(st.reason,'warn');return;}
+  }
   S.cxMode=mode;
   S.cxReason=null;
   setCxReasons(mode==='offers'
     ? ['Changed my mind','Found a better offer','Wrong pickup/drop-off','Will book later']
+    : r&&r.status==='in-transit'
+      ? ['Safety concern','Route mismatch','Driver asked to cancel','Vehicle issue']
     : ['Changed my mind','Driver is taking too long','Booked by mistake','Found another ride']);
   $('cxConfirmBtn').disabled=true;$('cxConfirmBtn').style.opacity='.4';$('cxConfirmBtn').style.cursor='not-allowed';
   if(mode==='offers'){
@@ -542,6 +624,10 @@ function confirmCancel(){
     cancelOffers(reason);
     return;
   }
+  if(S.active&&S.active.status==='in-transit'){
+    const st=transitCancelState();
+    if(!st.allowed){toast(st.reason,'warn');closeCxModal();return;}
+  }
   clearInterval(rideInt);rideInt=null;S.prog=0;
   const r=S.active;
   if(r){
@@ -564,7 +650,7 @@ function updateCR(){
   if(!r){$('noRide').classList.remove('hidden');$('actPanel').classList.add('hidden');$('crSub').textContent='No active ride';return;}
   $('noRide').classList.add('hidden');$('actPanel').classList.remove('hidden');
   $('aAv').textContent=ini(r.name);$('aDName').textContent=r.name;
-  $('aVInfo').innerHTML=r.veh+' · '+PL[r.plat];
+  $('aVInfo').innerHTML=r.veh+' · '+platName(r.plat);
   $('aPU').textContent=r.pickup;$('aDO').textContent=r.dropoff;
   $('amFare').textContent=pkr(r.fare);$('amDist').textContent=r.dist+' km';$('amTime').textContent=r.eta+' min';
   for(let i=1;i<=4;i++){const el=$(`st${i}`);el.classList.remove('ac','dn');if(i<r.step)el.classList.add('dn');else if(i===r.step)el.classList.add('ac');}
@@ -593,6 +679,7 @@ function updateCR(){
   }else if(r.status==='in-transit'){
     $('sText').textContent='In Transit';$('sBadge').className='sbadge tr';
     $('aEta').textContent='En route to destination';$('crSub').textContent='Ride in progress';
+    const tcs=transitCancelState();
     btn.innerHTML=`
       <div style="flex:1;">
         <div style="font-size:10px;font-weight:600;color:var(--txtm);margin-bottom:6px;text-transform:uppercase;letter-spacing:.8px;">🏁 En route to drop-off</div>
@@ -600,7 +687,9 @@ function updateCR(){
           <div id="tripProgressBar" style="height:100%;background:linear-gradient(90deg,var(--bykea-bd),var(--bykea-acc));border-radius:20px;width:${Math.round(S.prog*100)}%;transition:width 1s linear;"></div>
         </div>
         <div style="font-size:10px;color:var(--txtm);margin-top:5px;">Rider will end the ride upon reaching drop-off point</div>
-      </div>`;
+        <div style="font-size:10px;color:var(--txtm);margin-top:4px;">${tcs.allowed?'Cancellation available in early/mid transit for special cases.':'Cancellation locked near destination.'}</div>
+      </div>
+      ${tcs.allowed?'<button class="bact bcx" onclick="openCxModal()" style="flex:0 0 auto;max-width:140px;">✕ Cancel Ride</button>':'<button class="bact bcx" disabled style="flex:0 0 auto;max-width:160px;opacity:.4;cursor:not-allowed;">Cancel Unavailable</button>'}`;
   }
 }
 
@@ -697,7 +786,7 @@ function refreshStats(){
   const c=S.log.completed.filter(r=>r.status!=='cancelled');
   $('sTR').textContent=c.length;
   const total=c.reduce((s,r)=>s+(r.fare||0),0);$('sTS').textContent=pkr(total);
-  const avgF=c.length?c.reduce((s,r)=>s+(BASE[r.vehType||'Sedan']*INF*1.1),0)/c.length:0;
+  const avgF=c.length?c.reduce((s,r)=>s+(baseFare(r.vehType||'Sedan')*INF*1.1),0)/c.length:0;
   const saved=c.reduce((s,r)=>s+Math.max(0,(avgF-(r.fare||0))),0);
   $('sTSv').textContent=saved>0?pkr(saved):'Rs 0';
   setB('bB',S.log.booked.length);setB('bC',S.log.current?1:0);setB('bD',S.log.completed.length);
@@ -712,7 +801,7 @@ function renderLog(){
     <div class="ritem">
       <div class="ritop"><div class="ridate">${new Date(r.bookedAt).toLocaleDateString('en-PK',{day:'numeric',month:'short',year:'numeric'})}</div><div class="riamt">${r.status==='cancelled'?'<span style="font-size:10px;color:#e07070;font-weight:700;">CANCELLED</span>':pkr(r.fare)}</div></div>
       <div class="rirte"><div class="rp"><div class="rpdot p"></div><span>${r.pickup}</span></div><div class="rp"><div class="rpdot d"></div><span>${r.dropoff}</span></div></div>
-      <div class="rift"><span class="riplat ${r.plat}">${PL[r.plat]}</span>${r.review?`<div class="ristt">${[1,2,3,4,5].map(s=>`<span class="st${s>r.review.stars?' e':''}">&starf;</span>`).join('')}</div>`:`<span style="font-size:10px;color:var(--txtm);">${r.vehType||r.plat} · ${r.name}</span>`}</div>
+      <div class="rift"><span class="riplat ${r.plat}">${platName(r.plat)}</span>${r.review?`<div class="ristt">${[1,2,3,4,5].map(s=>`<span class="st${s>r.review.stars?' e':''}">&starf;</span>`).join('')}</div>`:`<span style="font-size:10px;color:var(--txtm);">${r.vehType||r.plat} · ${r.name}</span>`}</div>
     </div>`).join('');
 }
 
@@ -747,6 +836,10 @@ function pin(ctx,x,y,c,l){ctx.beginPath();ctx.arc(x,y,8,0,Math.PI*2);ctx.fillSty
 /* ── INIT ── */
 async function initApp(){
   await initSupabase();
+  await loadRefData();
+  renderVehicleTabs();
+  initLocationDefaults();
+  updFare();
   await load();
   if(S.user){
     $('scr-auth').style.display='none';

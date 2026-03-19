@@ -120,7 +120,7 @@
           <div class="seclbl">Pickup &amp; Drop-off</div>
           <div class="locwrap" id="lwP">
             <div class="loccard">
-              <div class="locrow"><div class="ld p"></div><input type="text" class="linput" id="pickup" value="DHA Phase 6, Karachi" placeholder="Pickup location" autocomplete="off" oninput="showDD('P',this.value)" onfocus="showDD('P',this.value)" onblur="hideDD('ddP',300)"></div>
+              <div class="locrow"><div class="ld p"></div><input type="text" class="linput" id="pickup" value="" placeholder="Pickup location" autocomplete="off" oninput="showDD('P',this.value)" onfocus="showDD('P',this.value)" onblur="hideDD('ddP',300)"></div>
             </div>
             <div class="locdd" id="ddP"></div>
           </div>
@@ -129,20 +129,13 @@
           </div>
           <div class="locwrap" id="lwD">
             <div class="loccard">
-              <div class="locrow"><div class="ld d"></div><input type="text" class="linput" id="dropoff" value="Dolmen Mall, Clifton" placeholder="Drop-off location" autocomplete="off" oninput="showDD('D',this.value)" onfocus="showDD('D',this.value)" onblur="hideDD('ddD',300)"></div>
+              <div class="locrow"><div class="ld d"></div><input type="text" class="linput" id="dropoff" value="" placeholder="Drop-off location" autocomplete="off" oninput="showDD('D',this.value)" onfocus="showDD('D',this.value)" onblur="hideDD('ddD',300)"></div>
             </div>
             <div class="locdd" id="ddD"></div>
           </div>
 
           <div class="seclbl">Vehicle Type</div>
-          <div class="vtabs" id="vtabs">
-            <div class="vtab active" onclick="selVeh(this,'Bike')" data-t="Bike"><span class="vtico">🏍️</span><span class="vtlbl">Bike</span></div>
-            <div class="vtab" onclick="selVeh(this,'Rickshaw')" data-t="Rickshaw"><span class="vtico">🛺</span><span class="vtlbl">Rickshaw</span></div>
-            <div class="vtab" onclick="selVeh(this,'Mini')" data-t="Mini"><span class="vtico">🚙</span><span class="vtlbl">Mini</span></div>
-            <div class="vtab" onclick="selVeh(this,'Sedan')" data-t="Sedan"><span class="vtico">🚗</span><span class="vtlbl">Sedan</span></div>
-            <div class="vtab" onclick="selVeh(this,'Business')" data-t="Business"><span class="vtico">🚐</span><span class="vtlbl">Business</span></div>
-            <div class="vtab cp" onclick="selVeh(this,'Carpool')" data-t="Carpool"><span class="vtico">👥</span><span class="vtlbl">Carpool</span></div>
-          </div>
+          <div class="vtabs" id="vtabs"></div>
           <hr class="dv">
           <div class="farebox">
             <div class="frow"><span>Distance</span><span id="fdist">8.2 km</span></div>

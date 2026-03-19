@@ -84,6 +84,17 @@ Notes:
 - It also applies grants and RLS policies for anon access (same model your app currently uses).
 - You can migrate frontend reads/writes table-by-table later without breaking current signup/login.
 
+## Dummy Data
+
+Run [supabase/dummy_data.sql](supabase/dummy_data.sql) after schema setup to seed demo rows for:
+- `vehicle_types`, `platforms`, `locations`
+- `users`, `prefs`
+- `drivers`, `vehicles`
+- `rides`, `ride_offers`, `ride_status`, `reviews`
+- `sw_users` (legacy compatibility)
+
+The frontend now loads vehicle types, platforms, locations, drivers, and vehicles from Supabase instead of hardcoded JS arrays.
+
 ## Run Locally
 
 You can open `index.html` directly, or use any static server:
